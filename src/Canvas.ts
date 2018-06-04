@@ -8,7 +8,7 @@ namespace Manifesto {
         }
 
         // @todo move to utils.
-        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any): ThumbnailImage | null {
+        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number): ThumbnailImage | null {
             const sizeRequest = Object.assign({
                 height: this.getHeight(),
                 width: this.getWidth(),
@@ -17,7 +17,23 @@ namespace Manifesto {
                 minWidth: 1,
                 minHeight: 1,
             }, sizeRequestInput);
-
+            // For distance function, removes negative sign.
+            const abs = n => (n < 0) ? ~n+1 : n;
+            // Compares distance between two properties from the sizeRequest (width/height)
+            const compareDistanceFromSizeRequest = propName => (a, b) => {
+                const diffA = abs(a[propName] - sizeRequest[propName]);
+                const diffB = abs(b[propName] - sizeRequest[propName]);
+                if (diffA < diffB) {
+                    return -1;
+                }
+                if (diffA > diffB) {
+                    return 1;
+                }
+                return 0;
+            };
+            const id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
+                ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
+                : thumbnailService['@id'];
             const region: string = 'full';
             const rotation: number = 0;
             const quality: string = (thumbnailService['@context'] && (thumbnailService['@context'].indexOf('/1.0/context.json') > -1 ||
@@ -37,20 +53,6 @@ namespace Manifesto {
                 ));
 
                 if (suitableSizes.length) {
-                    // Distance function, removes negative sign.
-                    const abs = n => (n < 0) ? ~n+1 : n;
-                    // Compares distance between two properties from the sizeRequest (width/height)
-                    const compareDistanceFromSizeRequest = propName => (a, b) => {
-                        const diffA = abs(a[propName] - sizeRequest[propName]);
-                        const diffB = abs(b[propName] - sizeRequest[propName]);
-                        if (diffA < diffB) {
-                            return -1;
-                        }
-                        if (diffA > diffB) {
-                            return 1;
-                        }
-                        return 0;
-                    };
                     // At this point we will definitely be returning an image, we just need to choose the right one.
                     // First order both by height and width (closest to request)
                     const heightFirst = suitableSizes.sort(compareDistanceFromSizeRequest('height'))[0];
@@ -65,10 +67,6 @@ namespace Manifesto {
                                 ? widthFirst
                                 : heightFirst
                         );
-
-                    const id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
-                        ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
-                        : thumbnailService['@id'];
 
                     return new ThumbnailImage(
                         [
@@ -86,8 +84,41 @@ namespace Manifesto {
                 }
             }
 
-            if (thumbnailService.profile) {
-                // If we have a profile...
+            // If we have tiles
+            if (thumbnailService.tiles) {
+                const suitableTile = thumbnailService.tiles.filter(tile => (
+                    // Scale factor can encapsulate whole image.
+                    Math.max(...tile.scaleFactors) * tile.width >= imageWidth &&
+                    // Within bounds
+                    tile.width >= sizeRequest.minWidth &&
+                    tile.width <= sizeRequest.maxWidth
+                ), []);
+                if (suitableTile.length) {
+                    // Within our bounds and scale factor compatible.
+                    const bestTile = suitableTile.sort(compareDistanceFromSizeRequest('width'))[0];
+                    const ratio = this.getWidth() / this.getHeight();
+                    const portrait = this.getHeight() > this.getWidth();
+                    const bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
+                    const bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
+
+                    return new ThumbnailImage(
+                        [
+                            id,
+                            region,
+                            [bestTileWidth, ''].join(','),
+                            rotation,
+                            quality + '.jpg' // @todo format against available.
+                        ].join('/'),
+                        sizeRequest.width,
+                        sizeRequest.height,
+                        bestTileWidth,
+                        bestTileHeight,
+                    );
+                }
+            }
+
+            if (thumbnailService.profile /* === level 1 or 2 */) {
+                // If we have a profile over level 0
             }
 
             if (sizeRequestInput.follow) {
@@ -140,7 +171,7 @@ namespace Manifesto {
                 // Check for service
                 if (thumbnail.service) {
                     // We should be able to return something from this, even if its just the ID.
-                    const thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service);
+                    const thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth());
                     if (thumbnailFromThumbnailService) {
                         return thumbnailFromThumbnailService;
                     }
@@ -155,7 +186,7 @@ namespace Manifesto {
             const firstImageThumbnail = firstImage.getProperty('thumbnail');
             if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
                 if (firstImageThumbnail.service) {
-                    const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service);
+                    const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
                     if (thumbnailForFirstImageThumbnailService) {
                         return thumbnailForFirstImageThumbnailService;
                     }
@@ -166,7 +197,7 @@ namespace Manifesto {
             const firstImageServices = firstImage.getProperty('service');
             const firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
             if (firstImageService) {
-                const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService);
+                const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
                 if (thumbnailFromFirstImageService) {
                     return thumbnailFromFirstImageService;
                 }

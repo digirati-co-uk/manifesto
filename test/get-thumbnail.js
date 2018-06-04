@@ -190,6 +190,80 @@ describe('canvas.getThumbnail', function() {
       expect(thumbnail.scale).equal(2.05);
       expect(thumbnail.url).equal('https://dlcs.io/iiif-img/wellcome/1/8ac70935-b55b-4c6f-89ca-33e6ab9bb161/full/!1024,1024/0/default.jpg');
     });
+  });
 
-  })
+  describe('can only use the canvas.thumbnail if follow is true. The image service is level0, so we can\'t construct a specific tile request without some further information about tiles.', function() {
+
+    it('Should load the full image when follow is set to false', function() {
+      var canvas = manifest.getSequenceByIndex(0).getCanvasById('https://data.getty.edu/museum/api/iiif/1487/canvas/main1');
+      var thumbnail = canvas.getThumbnailAtSize({
+        width: 500,
+        height: 500,
+      });
+
+      expect(thumbnail.width).equal(344);
+      expect(thumbnail.height).equal(500);
+      expect(thumbnail.actualWidth).equal(172);
+      expect(thumbnail.actualHeight).equal(250);
+      expect(thumbnail.scale).equal(0.5);
+      expect(thumbnail.url).equal('https://data.getty.edu/museum/api/iiif/377212/full/172,250/0/default.jpg');
+    });
+
+    // @todo follow=true example
+  });
+
+  describe('There is no thumbnail at all! The image service is level0, so we can\'t construct a specific tile request without some further information about tiles.', function() {
+
+    it('should read inline sizes', function() {
+      var canvas = manifest.getSequenceByIndex(0).getCanvasById('https://data.getty.edu/museum/api/iiif/1487/canvas/main2');
+      var thumbnail = canvas.getThumbnailAtSize({
+        width: 500,
+        height: 500,
+      });
+
+      expect(thumbnail.width).equal(344);
+      expect(thumbnail.height).equal(500);
+      expect(thumbnail.actualWidth).equal(529);
+      expect(thumbnail.actualHeight).equal(768);
+      expect(thumbnail.scale).equal(1.54);
+      expect(thumbnail.url).equal('https://data.getty.edu/museum/api/iiif/377212/full/529,768/0/default.jpg');
+    });
+    // @todo follow=true example
+  });
+
+  describe('Level 0 only, but inline tiles on image service', function() {
+    it('should only read inline tiles', function() {
+      var canvas = manifest.getSequenceByIndex(0).getCanvasById('https://data.getty.edu/museum/api/iiif/1487/canvas/main3');
+      var thumbnail = canvas.getThumbnailAtSize({
+        width: 500,
+        height: 500,
+      });
+
+      expect(thumbnail.width).equal(344);
+      expect(thumbnail.height).equal(500);
+      expect(thumbnail.actualWidth).equal(175);
+      expect(thumbnail.actualHeight).equal(254);
+      expect(thumbnail.scale).equal(0.51);
+      expect(thumbnail.url).equal('https://data.getty.edu/museum/api/iiif/377212/full/175,/0/default.jpg');
+
+    });
+  });
+
+  describe('Level 0 only, but inline tiles on image service but the wrong size', function() {
+    it('should read inline tiles but not use them', function() {
+      var canvas = manifest.getSequenceByIndex(0).getCanvasById('https://data.getty.edu/museum/api/iiif/1487/canvas/main4');
+      var thumbnail = canvas.getThumbnailAtSize({
+        width: 500,
+        height: 500,
+      });
+
+      expect(thumbnail.width).equal(345);
+      expect(thumbnail.height).equal(500);
+      expect(thumbnail.actualWidth).equal(3105);
+      expect(thumbnail.actualHeight).equal(4504);
+      expect(thumbnail.scale).equal(9.01);
+      expect(thumbnail.url).equal('https://data.getty.edu/museum/api/iiif/377212/full/3105,4504/0/default.jpg');
+
+    });
+  });
 });

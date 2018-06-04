@@ -16,12 +16,19 @@ namespace Manifesto {
             targetWidth: number,
             targetHeight: number,
             actualWidth?: number,
-            actualHeight?: number
+            actualHeight?: number,
         ) {
             this.url = url;
             this.actualHeight = actualHeight || targetHeight;
             this.actualWidth = actualWidth || targetWidth;
-            if (actualHeight && actualWidth) {
+            // One trump card for height/width, IIIF specification.
+            const matches = url.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
+            if (matches) {
+                const newWidth = (+matches[1]) || this.actualWidth;
+                this.actualHeight = (+matches[2]) || Math.round((this.actualHeight / this.actualWidth) * newWidth);
+                this.actualWidth = newWidth;
+            }
+            if ((actualHeight && actualWidth) || this.actualWidth !== targetWidth || this.actualHeight !== targetHeight) {
                 /**
                  *   |------|       |----------|
                  *   |      |       |          |
@@ -52,14 +59,14 @@ namespace Manifesto {
                  *  |—|———————|—|
                  */
 
-                var cropHeight = (targetWidth / targetHeight) < (actualWidth / actualHeight);
-                this.width = Math.round(cropHeight ? targetWidth : targetHeight*(actualWidth / actualHeight));
-                this.height = Math.round(cropHeight ? targetWidth*(actualHeight / actualWidth) : targetHeight);
-                this.scale = +(cropHeight ? actualWidth / targetWidth : actualHeight / targetHeight).toFixed(2);
+                const cropHeight = (targetWidth / targetHeight) < (this.actualWidth / this.actualHeight);
+                this.width = Math.round(cropHeight ? targetWidth : targetHeight*(this.actualWidth / this.actualHeight));
+                this.height = Math.round(cropHeight ? targetWidth*(this.actualHeight / this.actualWidth) : targetHeight);
+                this.scale = +(cropHeight ? this.actualWidth / targetWidth : this.actualHeight / targetHeight).toFixed(2);
             } else {
                 this.height = targetHeight;
                 this.width = targetWidth;
-                this.scale = this.actualWidth / targetWidth;
+                this.scale = 1;
             }
         }
 

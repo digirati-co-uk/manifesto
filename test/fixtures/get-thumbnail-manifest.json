@@ -355,9 +355,52 @@
           ]
         },
         {
-          "@id": "https://data.getty.edu/museum/api/iiif/1487/canvas/main2",
+          "@id": "https://data.getty.edu/museum/api/iiif/1487/canvas/main3",
           "@type": "sc:Canvas",
           "label": "8b. Level 0 only, but inline tiles on image service",
+          "description": "For 8b there are no sizes, we just have static tiles. Again, pulling these inline to avoid implementing `follow` for now (otherwise you'd have to dereference the info.json per thumbnail)",
+          "width": 3105,
+          "height": 4504,
+          "images": [
+            {
+              "@id": "https://data.getty.edu/museum/api/iiif/1487/annotation/main-image",
+              "@type": "oa:Annotation",
+              "motivation": "sc:painting",
+              "resource": {
+                "@id": "https://data.getty.edu/museum/api/iiif/377212/full/3105,4504/0/default.jpg",
+                "@type": "dctypes:Image",
+                "format": "image/jpeg",
+                "service": {
+                  "@context": "http:/iiif.io/api/image/2/context.json",
+                  "@id": "https://data.getty.edu/museum/api/iiif/377212",
+                  "profile": "http:/iiif.io/api/image/2/level0.json",
+                  "width": 3105,
+                  "height": 4504,
+                  "tiles": [
+                    {
+                      "width": 254,
+                      "scaleFactors": [
+                        1,
+                        2,
+                        4,
+                        8,
+                        16,
+                        32
+                      ]
+                    }
+                  ]
+                },
+                "width": 3105,
+                "height": 4504
+              },
+              "on": "https://data.getty.edu/museum/api/iiif/1487/canvas/main"
+            }
+          ]
+        },
+        {
+          "@id": "https://data.getty.edu/museum/api/iiif/1487/canvas/main4",
+          "@type": "sc:Canvas",
+          "label": "8b. Level 0 only, but inline tiles on image service that are not the right size, should reject",
           "description": "For 8b there are no sizes, we just have static tiles. Again, pulling these inline to avoid implementing `follow` for now (otherwise you'd have to dereference the info.json per thumbnail)",
           "width": 3105,
           "height": 4504,
