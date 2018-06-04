@@ -6,5 +6,6 @@ namespace Manifesto {
         resource: IIIIFResource;
         navDate?: Date;
         pessimisticAccessControl: boolean; // false
+        defaultThumbnailOptions?: IThumbnailSizeRequest;
     }
 }
