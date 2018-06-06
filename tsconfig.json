@@ -11,7 +11,7 @@
         "strictNullChecks": true,
         "target": "es5",
         "lib": ["es6", "dom"],
-        "types": ["node"]
+        "types": ["node", "jest"]
     },
     "files": [
         "src/Definitions.ts",

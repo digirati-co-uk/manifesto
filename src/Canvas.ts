@@ -180,10 +180,10 @@ namespace Manifesto {
             }
 
             // In the case of no thumbnail property, try the first image.
-            const firstImage: IResource = this.getImages()[0].getResource();
+            const firstImage: IResource = this.getImages()[0].getResource() || this.getImages()[0].getBody()[0] || null;
 
             // First image thumbnail service.
-            const firstImageThumbnail = firstImage.getProperty('thumbnail');
+            const firstImageThumbnail = firstImage ? firstImage.getProperty('thumbnail') : null;
             if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
                 if (firstImageThumbnail.service) {
                     const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
@@ -194,7 +194,7 @@ namespace Manifesto {
             }
 
             // First image service.
-            const firstImageServices = firstImage.getProperty('service');
+            const firstImageServices = firstImage ? firstImage.getProperty('service') : null;
             const firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
             if (firstImageService) {
                 const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
