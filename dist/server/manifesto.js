@@ -885,6 +885,189 @@ var Manifesto;
         function Canvas(jsonld, options) {
             return _super.call(this, jsonld, options) || this;
         }
+        // @todo move to utils.
+        Canvas.prototype.imageServiceToThumbnail = function (sizeRequestInput, thumbnailService, imageWidth) {
+            var sizeRequest = Object.assign({
+                height: this.getHeight(),
+                width: this.getWidth(),
+                maxHeight: Infinity,
+                maxWidth: Infinity,
+                minWidth: 1,
+                minHeight: 1,
+            }, sizeRequestInput);
+            // For distance function, removes negative sign.
+            var abs = function (n) { return (n < 0) ? ~n + 1 : n; };
+            // Compares distance between two properties from the sizeRequest (width/height)
+            var compareDistanceFromSizeRequest = function (propName) { return function (a, b) {
+                var diffA = abs(a[propName] - sizeRequest[propName]);
+                var diffB = abs(b[propName] - sizeRequest[propName]);
+                if (diffA < diffB) {
+                    return -1;
+                }
+                if (diffA > diffB) {
+                    return 1;
+                }
+                return 0;
+            }; };
+            var id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
+                ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
+                : thumbnailService['@id'];
+            var region = 'full';
+            var rotation = 0;
+            var quality = (thumbnailService['@context'] && (thumbnailService['@context'].indexOf('/1.0/context.json') > -1 ||
+                thumbnailService['@context'].indexOf('/1.1/context.json') > -1 ||
+                thumbnailService['@context'].indexOf('/1/context.json') > -1)) ? 'native' : 'default';
+            if (thumbnailService.sizes && thumbnailService.sizes.length) {
+                // We can find the closest size and return.
+                // There is 4 data points that filter data out, and 2 data points that order.
+                // The 4 data points that filter are {min,max}{Height,Width}
+                var suitableSizes = thumbnailService.sizes.filter(function (size) { return (size.height <= sizeRequest.maxHeight &&
+                    size.height >= sizeRequest.minHeight &&
+                    size.width <= sizeRequest.maxWidth &&
+                    size.width >= sizeRequest.minWidth); });
+                if (suitableSizes.length) {
+                    // At this point we will definitely be returning an image, we just need to choose the right one.
+                    // First order both by height and width (closest to request)
+                    var heightFirst = suitableSizes.sort(compareDistanceFromSizeRequest('height'))[0];
+                    var widthFirst = suitableSizes.sort(compareDistanceFromSizeRequest('width'))[0];
+                    // If they agree, just pick one. If not choose the closest (pixel-wise).
+                    // Maybe we should just choose the largest one. @todo review.
+                    var selectedValue = heightFirst === widthFirst
+                        ? (widthFirst)
+                        : (abs(widthFirst.width - sizeRequest.width) < abs(heightFirst.height - sizeRequest.height)
+                            ? widthFirst
+                            : heightFirst);
+                    return new Manifesto.ThumbnailImage([
+                        id,
+                        region,
+                        [selectedValue.width, selectedValue.height].join(','),
+                        rotation,
+                        quality + '.jpg' // @todo format against available.
+                    ].join('/'), sizeRequest.width, sizeRequest.height, selectedValue.width, selectedValue.height);
+                }
+            }
+            // If we have tiles
+            if (thumbnailService.tiles) {
+                var suitableTile = thumbnailService.tiles.filter(function (tile) { return (
+                // Scale factor can encapsulate whole image.
+                Math.max.apply(Math, tile.scaleFactors) * tile.width >= imageWidth &&
+                    // Within bounds
+                    tile.width >= sizeRequest.minWidth &&
+                    tile.width <= sizeRequest.maxWidth); }, []);
+                if (suitableTile.length) {
+                    // Within our bounds and scale factor compatible.
+                    var bestTile = suitableTile.sort(compareDistanceFromSizeRequest('width'))[0];
+                    var ratio = this.getWidth() / this.getHeight();
+                    var portrait = this.getHeight() > this.getWidth();
+                    var bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
+                    var bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
+                    return new Manifesto.ThumbnailImage([
+                        id,
+                        region,
+                        [bestTileWidth, ''].join(','),
+                        rotation,
+                        quality + '.jpg' // @todo format against available.
+                    ].join('/'), sizeRequest.width, sizeRequest.height, bestTileWidth, bestTileHeight);
+                }
+            }
+            if (thumbnailService.profile /* === level 1 or 2 */) {
+                // If we have a profile over level 0
+            }
+            if (sizeRequestInput.follow) {
+                // If we have follow set to true, we can load the info.json and try to load that.
+            }
+            return null;
+        };
+        Canvas.prototype.thumbnailInBounds = function (sizeInput, thumbnail) {
+            return (thumbnail.width || Infinity) >= (sizeInput.minWidth || 0) &&
+                (thumbnail.width || 0) <= (sizeInput.maxWidth || Infinity) &&
+                (thumbnail.height || Infinity) >= (sizeInput.minHeight || 0) &&
+                (thumbnail.height || 0) <= (sizeInput.maxHeight || Infinity);
+        };
+        /**
+         * Get thumbnail at a specific size.
+         *
+         * This will check the following places in order for a suitable thumbnail at a preferred size.
+         *
+         * - Thumbnail service on canvas
+         * - Thumbnail service on first image
+         * - Image service on first image
+         *
+         * If we can't find a preferred size, we fallback to the following in order:
+         * - Thumbnail property on canvas (string)
+         * - Thumbnail property on first image (string)
+         * - Thumbnail ID on canvas
+         * - Thumbnail ID on first image
+         * - First image ID.
+         *
+         * If you pass in `{ follow: true }` into the configuration, then it will follow the thumbnail services
+         * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
+         * Note: This option is off by default, to avoid multiple requests per thumbnail.
+         */
+        Canvas.prototype.getThumbnailAtSize = function (sizeRequestInput) {
+            var sizeInput = sizeRequestInput || this.options.defaultThumbnailOptions || {
+                width: 100,
+                height: 150,
+                maxWidth: 150,
+                maxHeight: 150,
+                minWidth: 0,
+                minHeight: 0,
+            };
+            // First check the thumbnail property of the canvas.
+            var thumbnail = this.getProperty('thumbnail');
+            if (thumbnail && typeof thumbnail !== 'string') {
+                // Check for service
+                if (thumbnail.service) {
+                    // We should be able to return something from this, even if its just the ID.
+                    var thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth());
+                    if (thumbnailFromThumbnailService) {
+                        return thumbnailFromThumbnailService;
+                    }
+                    // Fall through to check first image.
+                }
+            }
+            // In the case of no thumbnail property, try the first image.
+            var firstImage = this.getImages()[0].getResource() || this.getImages()[0].getBody()[0] || null;
+            // First image thumbnail service.
+            var firstImageThumbnail = firstImage ? firstImage.getProperty('thumbnail') : null;
+            if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
+                if (firstImageThumbnail.service) {
+                    var thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
+                    if (thumbnailForFirstImageThumbnailService) {
+                        return thumbnailForFirstImageThumbnailService;
+                    }
+                }
+            }
+            // First image service.
+            var firstImageServices = firstImage ? firstImage.getProperty('service') : null;
+            var firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
+            if (firstImageService) {
+                var thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
+                if (thumbnailFromFirstImageService) {
+                    return thumbnailFromFirstImageService;
+                }
+            }
+            // After this point, we could not find a preferred size.
+            // 1) if the thumbnail property on the canvas exists as a string, use that.
+            if (thumbnail && typeof thumbnail === 'string' && this.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
+                return new Manifesto.ThumbnailImage(thumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight());
+            }
+            // 2) if the thumbnail property on the canvas exists, use its ID.
+            if (thumbnail && thumbnail['@id'] && this.thumbnailInBounds(sizeInput, thumbnail)) {
+                return new Manifesto.ThumbnailImage(thumbnail['@id'], sizeInput.width, sizeInput.height, thumbnail.width || this.getWidth(), thumbnail.height || this.getHeight());
+            }
+            // 3) if the thumbnail property on the first image exists as a string, use that.
+            if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
+                return new Manifesto.ThumbnailImage(firstImageThumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight());
+            }
+            // 4) if the thumbnail property on the first image exists, use its ID.
+            if (firstImageThumbnail && firstImageThumbnail['@id'] && this.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return new Manifesto.ThumbnailImage(firstImageThumbnail['@id'], sizeInput.width, sizeInput.height, firstImageThumbnail.width || this.getWidth(), firstImageThumbnail.height || this.getHeight());
+            }
+            // 5) We found nothing, use the ID of the first image.
+            // @todo could fallback further to out of bounds images?
+            return new Manifesto.ThumbnailImage(firstImage.getProperty('@id'), sizeInput.width, sizeInput.height, firstImage.getWidth() || this.getWidth(), firstImage.getHeight() || this.getHeight());
+        };
         // http://iiif.io/api/image/2.1/#canonical-uri-syntax
         Canvas.prototype.getCanonicalImageUri = function (w) {
             var id = null;
@@ -3351,6 +3534,8 @@ var Manifesto;
 
 
 
+
+
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
         ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
@@ -3371,4 +3556,68 @@ var Manifesto;
         return Thumbnail;
     }(Manifesto.Resource));
     Manifesto.Thumbnail = Thumbnail;
+})(Manifesto || (Manifesto = {}));
+
+var Manifesto;
+(function (Manifesto) {
+    var ThumbnailImage = /** @class */ (function () {
+        function ThumbnailImage(url, targetWidth, targetHeight, actualWidth, actualHeight) {
+            this.url = url;
+            this.actualHeight = actualHeight || targetHeight;
+            this.actualWidth = actualWidth || targetWidth;
+            // One trump card for height/width, IIIF specification.
+            var matches = url.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
+            if (matches) {
+                var newWidth = (+matches[1]) || this.actualWidth;
+                this.actualHeight = (+matches[2]) || Math.round((this.actualHeight / this.actualWidth) * newWidth);
+                this.actualWidth = newWidth;
+            }
+            if ((actualHeight && actualWidth) || this.actualWidth !== targetWidth || this.actualHeight !== targetHeight) {
+                /**
+                 *   |------|       |----------|
+                 *   |      |       |          |
+                 *   |------|       |----------|
+                 *  100 / 100   >    150 / 100
+                 *  =   1       >       1.5
+                 *  =   false
+                 *
+                 *  target: 150x100 scaled down to: 100x66.67 to fit in 100x100
+                 *  |––––––––––|
+                 *  |----------|
+                 *  |          |
+                 *  |----------|
+                 *  |——————————|
+                 *
+                 *   |------|       |--------|
+                 *   |      |       |        |
+                 *   |------|       |        |
+                 *                  |--------|
+                 *  100 / 100   >    100 / 150
+                 *  =   1       >       0.6667
+                 *  =   true
+                 *
+                 *  target: 100x150 scaled down to: 66.67x100 to fit in 100x100
+                 *  |—|–––––––|—|
+                 *  | |       | |
+                 *  | |       | |
+                 *  |—|———————|—|
+                 */
+                var cropHeight = (targetWidth / targetHeight) < (this.actualWidth / this.actualHeight);
+                this.width = Math.round(cropHeight ? targetWidth : targetHeight * (this.actualWidth / this.actualHeight));
+                this.height = Math.round(cropHeight ? targetWidth * (this.actualHeight / this.actualWidth) : targetHeight);
+                this.scale = +(cropHeight ? this.actualWidth / targetWidth : this.actualHeight / targetHeight).toFixed(2);
+            }
+            else {
+                this.height = targetHeight;
+                this.width = targetWidth;
+                this.scale = 1;
+            }
+        }
+        ThumbnailImage.prototype.toString = function () {
+            return this.url;
+        };
+        ;
+        return ThumbnailImage;
+    }());
+    Manifesto.ThumbnailImage = ThumbnailImage;
 })(Manifesto || (Manifesto = {}));

@@ -284,6 +284,29 @@ declare namespace Manifesto {
     class Canvas extends Resource implements ICanvas {
         ranges: IRange[];
         constructor(jsonld?: any, options?: IManifestoOptions);
+        private imageServiceToThumbnail(sizeRequestInput, thumbnailService, imageWidth);
+        thumbnailInBounds(sizeInput: IThumbnailSizeRequest, thumbnail: any): boolean;
+        /**
+         * Get thumbnail at a specific size.
+         *
+         * This will check the following places in order for a suitable thumbnail at a preferred size.
+         *
+         * - Thumbnail service on canvas
+         * - Thumbnail service on first image
+         * - Image service on first image
+         *
+         * If we can't find a preferred size, we fallback to the following in order:
+         * - Thumbnail property on canvas (string)
+         * - Thumbnail property on first image (string)
+         * - Thumbnail ID on canvas
+         * - Thumbnail ID on first image
+         * - First image ID.
+         *
+         * If you pass in `{ follow: true }` into the configuration, then it will follow the thumbnail services
+         * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
+         * Note: This option is off by default, to avoid multiple requests per thumbnail.
+         */
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): ThumbnailImage;
         getCanonicalImageUri(w?: number): string;
         getMaxDimensions(): Size | null;
         getContent(): IAnnotation[];
@@ -687,6 +710,7 @@ declare namespace Manifesto {
 declare namespace Manifesto {
     interface ICanvas extends IResource {
         ranges: IRange[];
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): ThumbnailImage;
         getCanonicalImageUri(width?: number): string;
         getContent(): IAnnotation[];
         getDuration(): number | null;
@@ -843,6 +867,7 @@ declare namespace Manifesto {
         resource: IIIIFResource;
         navDate?: Date;
         pessimisticAccessControl: boolean;
+        defaultThumbnailOptions?: IThumbnailSizeRequest;
     }
 }
 
@@ -957,7 +982,44 @@ declare namespace Manifesto {
 }
 
 declare namespace Manifesto {
+    interface IThumbnailImage {
+        url: string;
+        height: number;
+        width: number;
+        actualWidth: number;
+        actualHeight: number;
+        scale: number;
+        toString(): string;
+    }
+}
+
+declare namespace Manifesto {
+    interface IThumbnailSizeRequest {
+        height: number;
+        width: number;
+        maxWidth?: number;
+        maxHeight?: number;
+        minHeight?: number;
+        minWidth?: number;
+        follow?: boolean;
+    }
+}
+
+declare namespace Manifesto {
     class Thumbnail extends Resource implements IThumbnail {
         constructor(jsonld: any, options: IManifestoOptions);
+    }
+}
+
+declare namespace Manifesto {
+    class ThumbnailImage implements IThumbnailImage {
+        url: string;
+        height: number;
+        width: number;
+        actualWidth: number;
+        actualHeight: number;
+        scale: number;
+        constructor(url: string, targetWidth: number, targetHeight: number, actualWidth?: number, actualHeight?: number);
+        toString(): string;
     }
 }

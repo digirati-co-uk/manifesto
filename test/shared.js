@@ -3,9 +3,10 @@ var http = require('http');
 var serveStatic = require('serve-static');
 
 var server;
+var serverUsers = 0;
 
 (function(){
-    before(function(done) {
+    beforeAll(function(done) {
 
         var serve = serveStatic('test/fixtures', {'index': ['index.html', 'index.htm']});
 
@@ -19,7 +20,8 @@ var server;
         done();
     });
 
-    after(function() {
-        server.close();
+    afterAll(function() {
+      server.close();
+      server = null;
     });
 })();
