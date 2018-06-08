@@ -284,7 +284,7 @@ declare namespace Manifesto {
     class Canvas extends Resource implements ICanvas {
         ranges: IRange[];
         constructor(jsonld?: any, options?: IManifestoOptions);
-        private imageServiceToThumbnail(sizeRequestInput, thumbnailService, imageWidth);
+        private imageServiceToThumbnail(sizeRequestInput, thumbnailService, imageWidth, label, index);
         static thumbnailInBounds(sizeInput: IThumbnailSizeRequest, thumbnail: any): boolean;
         /**
          * Get thumbnail at a specific size.
@@ -306,7 +306,8 @@ declare namespace Manifesto {
          * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
          * Note: This option is off by default, to avoid multiple requests per thumbnail.
          */
-        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): Promise<ThumbnailImage>;
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): IThumb;
+        getThumbnail(): Thumbnail | null;
         getCanonicalImageUri(w?: number): string;
         getMaxDimensions(): Size | null;
         getContent(): IAnnotation[];
@@ -439,6 +440,7 @@ declare namespace Manifesto {
         getStartCanvasIndex(): number;
         getThumbs(width: number, height?: number): Manifesto.IThumb[];
         getThumbnails(): Manifesto.IThumbnail[];
+        getThumbnailAtSize(sizeRequest: IThumbnailSizeRequest): IThumb[];
         getStartCanvas(): string;
         getTotalCanvases(): number;
         getViewingDirection(): ViewingDirection;
@@ -710,7 +712,7 @@ declare namespace Manifesto {
 declare namespace Manifesto {
     interface ICanvas extends IResource {
         ranges: IRange[];
-        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): Promise<ThumbnailImage>;
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): IThumb;
         getCanonicalImageUri(width?: number): string;
         getContent(): IAnnotation[];
         getDuration(): number | null;
@@ -983,7 +985,11 @@ declare namespace Manifesto {
 
 declare namespace Manifesto {
     interface IThumbnailImage {
-        url: string;
+        data: any;
+        index: number;
+        uri: string;
+        label: string;
+        visible: boolean;
         height: number;
         width: number;
         actualWidth: number;
@@ -1012,14 +1018,18 @@ declare namespace Manifesto {
 }
 
 declare namespace Manifesto {
-    class ThumbnailImage implements IThumbnailImage {
-        url: string;
+    class ThumbnailImage implements IThumbnailImage, IThumb {
+        uri: string;
         height: number;
         width: number;
         actualWidth: number;
         actualHeight: number;
         scale: number;
-        constructor(url: string, targetWidth: number, targetHeight: number, actualWidth?: number, actualHeight?: number);
+        data: any;
+        index: number;
+        label: string;
+        visible: boolean;
+        constructor(index: number, label: string, uri: string, targetWidth: number, targetHeight: number, actualWidth?: number, actualHeight?: number);
         toString(): string;
     }
 }

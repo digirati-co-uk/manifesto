@@ -8,10 +8,14 @@ namespace Manifesto {
         }
 
         // @todo move to utils.
-        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number): Promise<ThumbnailImage> | null {
+        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number, label: string, index: number): IThumb | null {
             const sizeRequest = sizeRequestInput instanceof ThumbnailSizeRequest
                 ? sizeRequestInput
                 : new ThumbnailSizeRequest(sizeRequestInput);
+
+            const getProperty = prop => obj => obj['@'+prop] ? obj['@'+prop] : obj[prop];
+            const getId = getProperty('id');
+            const getContext = getProperty('context');
 
             // For distance function, removes negative sign.
             const abs = n => (n < 0) ? ~n+1 : n;
@@ -27,14 +31,14 @@ namespace Manifesto {
                 }
                 return 0;
             };
-            const id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
-                ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
-                : thumbnailService['@id'];
+            const id = getId(thumbnailService) && getId(thumbnailService).endsWith('/')
+                ? getId(thumbnailService).substr(0, getId(thumbnailService).length - 1)
+                : getId(thumbnailService);
             const region: string = 'full';
             const rotation: number = 0;
-            const quality: string = (thumbnailService['@context'] && (thumbnailService['@context'].indexOf('/1.0/context.json') > -1 ||
-                thumbnailService['@context'].indexOf('/1.1/context.json') > -1 ||
-                thumbnailService['@context'].indexOf('/1/context.json') > -1 )) ? 'native' : 'default';
+            const quality: string = (getContext(thumbnailService) && (getContext(thumbnailService).indexOf('/1.0/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1.1/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1/context.json') > -1 )) ? 'native' : 'default';
 
             if (thumbnailService.sizes && thumbnailService.sizes.length) {
                 // We can find the closest size and return.
@@ -64,20 +68,20 @@ namespace Manifesto {
                                 : heightFirst
                         );
 
-                    return Promise.resolve(
-                        new ThumbnailImage(
-                            [
-                                id,
-                                region,
-                                [selectedValue.width, selectedValue.height].join(','),
-                                rotation,
-                                quality + '.jpg' // @todo format against available.
-                            ].join('/'),
-                            sizeRequest.width,
-                            sizeRequest.height,
-                            selectedValue.width,
-                            selectedValue.height,
-                        )
+                    return new ThumbnailImage(
+                        index,
+                        label,
+                        [
+                            id,
+                            region,
+                            [selectedValue.width, selectedValue.height].join(','),
+                            rotation,
+                            quality + '.jpg' // @todo format against available.
+                        ].join('/'),
+                        sizeRequest.width,
+                        sizeRequest.height,
+                        selectedValue.width,
+                        selectedValue.height,
                     );
                 }
             }
@@ -99,20 +103,21 @@ namespace Manifesto {
                     const bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
                     const bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
 
-                    return Promise.resolve(
-                        new ThumbnailImage(
-                            [
-                                id,
-                                region,
-                                [bestTileWidth, ''].join(','),
-                                rotation,
-                                quality + '.jpg' // @todo format against available.
-                            ].join('/'),
-                            sizeRequest.width,
-                            sizeRequest.height,
-                            bestTileWidth,
-                            bestTileHeight,
-                        )
+
+                    return new ThumbnailImage(
+                        index,
+                        label,
+                        [
+                            id,
+                            region,
+                            [bestTileWidth, ''].join(','),
+                            rotation,
+                            quality + '.jpg' // @todo format against available.
+                        ].join('/'),
+                        sizeRequest.width,
+                        sizeRequest.height,
+                        bestTileWidth,
+                        bestTileHeight,
                     );
                 }
             }
@@ -155,7 +160,7 @@ namespace Manifesto {
          * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
          * Note: This option is off by default, to avoid multiple requests per thumbnail.
          */
-        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): Promise<ThumbnailImage> {
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): IThumb {
             const sizeInput: IThumbnailSizeRequest = sizeRequestInput || this.options.defaultThumbnailOptions || {
                 width: 100,
                 height: 150,
@@ -164,6 +169,7 @@ namespace Manifesto {
                 minWidth: 0,
                 minHeight: 0,
             };
+            const label = <string>TranslationCollection.getValue(this.getLabel(), this.options.locale);
 
             // First check the thumbnail property of the canvas.
             const thumbnail = this.getProperty('thumbnail');
@@ -171,7 +177,7 @@ namespace Manifesto {
                 // Check for service
                 if (thumbnail.service) {
                     // We should be able to return something from this, even if its just the ID.
-                    const thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth());
+                    const thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth(), label, this.index);
                     if (thumbnailFromThumbnailService) {
                         return thumbnailFromThumbnailService;
                     }
@@ -180,13 +186,13 @@ namespace Manifesto {
             }
 
             // In the case of no thumbnail property, try the first image.
-            const firstImage: IResource = this.getImages()[0].getResource();
+            const firstImage: Resource = this.getImages()[0].getResource();
 
             // First image thumbnail service.
             const firstImageThumbnail = firstImage.getProperty('thumbnail');
             if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
                 if (firstImageThumbnail.service) {
-                    const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
+                    const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth(), label, this.index);
                     if (thumbnailForFirstImageThumbnailService) {
                         return thumbnailForFirstImageThumbnailService;
                     }
@@ -197,7 +203,7 @@ namespace Manifesto {
             const firstImageServices = firstImage.getProperty('service');
             const firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
             if (firstImageService) {
-                const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
+                const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth(), label, this.index);
                 if (thumbnailFromFirstImageService) {
                     return thumbnailFromFirstImageService;
                 }
@@ -206,72 +212,86 @@ namespace Manifesto {
             // After this point, we could not find a preferred size.
             // 1) if the thumbnail property on the canvas exists as a string, use that.
             if (thumbnail && typeof thumbnail === 'string' && Canvas.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
-                return Promise.resolve(
-                    new ThumbnailImage(
-                        thumbnail,
-                        sizeInput.width,
-                        sizeInput.height,
-                        this.getWidth(),
-                        this.getHeight(),
-                    )
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    thumbnail,
+                    sizeInput.width,
+                    sizeInput.height,
+                    this.getWidth(),
+                    this.getHeight(),
                 );
             }
 
             // 2) if the thumbnail property on the canvas exists, use its ID.
-            if (thumbnail && thumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
-                return Promise.resolve(
-                    new ThumbnailImage(
-                        thumbnail['@id'],
-                        sizeInput.width,
-                        sizeInput.height,
-                        thumbnail.width || this.getWidth(),
-                        thumbnail.height || this.getHeight(),
-                    )
+            if (thumbnail && (thumbnail['@id'] || thumbnail.id) && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    thumbnail['@id'] || thumbnail.id,
+                    sizeInput.width,
+                    sizeInput.height,
+                    thumbnail.width || this.getWidth(),
+                    thumbnail.height || this.getHeight(),
                 );
             }
 
             // 3) if the thumbnail property on the first image exists as a string, use that.
             if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
-                return Promise.resolve(
-                    new ThumbnailImage(
-                        firstImageThumbnail,
-                        sizeInput.width,
-                        sizeInput.height,
-                        this.getWidth(),
-                        this.getHeight(),
-                    )
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    firstImageThumbnail,
+                    sizeInput.width,
+                    sizeInput.height,
+                    this.getWidth(),
+                    this.getHeight(),
                 );
             }
 
             // 4) if the thumbnail property on the first image exists, use its ID.
-            if (firstImageThumbnail && firstImageThumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
-                return Promise.resolve(
-                    new ThumbnailImage(
-                        firstImageThumbnail['@id'],
-                        sizeInput.width,
-                        sizeInput.height,
-                        firstImageThumbnail.width || this.getWidth(),
-                        firstImageThumbnail.height || this.getHeight(),
-                    )
+            if (firstImageThumbnail && (firstImageThumbnail['@id'] || firstImageThumbnail.id) && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    firstImageThumbnail['@id'] || firstImageThumbnail.id,
+                    sizeInput.width,
+                    sizeInput.height,
+                    firstImageThumbnail.width || this.getWidth(),
+                    firstImageThumbnail.height || this.getHeight(),
                 );
             }
 
             // 5) We found nothing, use the ID of the first image.
             // @todo could fallback further to out of bounds images?
-            return Promise.resolve(
-                new ThumbnailImage(
-                    firstImage.getProperty('@id'),
-                    sizeInput.width,
-                    sizeInput.height,
-                    firstImage.getWidth() || this.getWidth(),
-                    firstImage.getHeight() || this.getHeight(),
-                )
+            return new ThumbnailImage(
+                this.index,
+                label,
+                firstImage.getProperty('id'),
+                sizeInput.width,
+                sizeInput.height,
+                firstImage.getWidth() || this.getWidth(),
+                firstImage.getHeight() || this.getHeight(),
             );
+        }
+
+        getThumbnail(): Thumbnail | null {
+            let thumbnail: any = this.getProperty('thumbnail');
+
+            if (Array.isArray(thumbnail)) {
+                thumbnail = thumbnail[0];
+            }
+
+            if (thumbnail) {
+                return new Thumbnail(thumbnail, this.options);
+            }
+
+            return null;
         }
 
         // http://iiif.io/api/image/2.1/#canonical-uri-syntax
         getCanonicalImageUri(w?: number): string {
-
+            console.warn('getCanonicalImageUri will be deprecated, use getThumbnailAtSize instead');
             let id: string | null = null;
             const region: string = 'full';
             const rotation: number = 0;

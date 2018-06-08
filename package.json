@@ -54,6 +54,7 @@
     "jest": "^23.1.0",
     "merge2": "0.3.5",
     "mocha": "2.2.4",
+    "npm-watch": "^0.3.0",
     "require-dir": "0.3.0",
     "run-sequence": "1.1.0",
     "serve-static": "1.10.0",

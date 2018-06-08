@@ -815,10 +815,13 @@ var Manifesto;
             return _super.call(this, jsonld, options) || this;
         }
         // @todo move to utils.
-        Canvas.prototype.imageServiceToThumbnail = function (sizeRequestInput, thumbnailService, imageWidth) {
+        Canvas.prototype.imageServiceToThumbnail = function (sizeRequestInput, thumbnailService, imageWidth, label, index) {
             var sizeRequest = sizeRequestInput instanceof Manifesto.ThumbnailSizeRequest
                 ? sizeRequestInput
                 : new Manifesto.ThumbnailSizeRequest(sizeRequestInput);
+            var getProperty = function (prop) { return function (obj) { return obj['@' + prop] ? obj['@' + prop] : obj[prop]; }; };
+            var getId = getProperty('id');
+            var getContext = getProperty('context');
             // For distance function, removes negative sign.
             var abs = function (n) { return (n < 0) ? ~n + 1 : n; };
             // Compares distance between two properties from the sizeRequest (width/height)
@@ -833,14 +836,14 @@ var Manifesto;
                 }
                 return 0;
             }; };
-            var id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
-                ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
-                : thumbnailService['@id'];
+            var id = getId(thumbnailService) && getId(thumbnailService).endsWith('/')
+                ? getId(thumbnailService).substr(0, getId(thumbnailService).length - 1)
+                : getId(thumbnailService);
             var region = 'full';
             var rotation = 0;
-            var quality = (thumbnailService['@context'] && (thumbnailService['@context'].indexOf('/1.0/context.json') > -1 ||
-                thumbnailService['@context'].indexOf('/1.1/context.json') > -1 ||
-                thumbnailService['@context'].indexOf('/1/context.json') > -1)) ? 'native' : 'default';
+            var quality = (getContext(thumbnailService) && (getContext(thumbnailService).indexOf('/1.0/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1.1/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1/context.json') > -1)) ? 'native' : 'default';
             if (thumbnailService.sizes && thumbnailService.sizes.length) {
                 // We can find the closest size and return.
                 // There is 4 data points that filter data out, and 2 data points that order.
@@ -861,13 +864,13 @@ var Manifesto;
                         : (abs(widthFirst.width - sizeRequest.width) < abs(heightFirst.height - sizeRequest.height)
                             ? widthFirst
                             : heightFirst);
-                    return Promise.resolve(new Manifesto.ThumbnailImage([
+                    return new Manifesto.ThumbnailImage(index, label, [
                         id,
                         region,
                         [selectedValue.width, selectedValue.height].join(','),
                         rotation,
                         quality + '.jpg' // @todo format against available.
-                    ].join('/'), sizeRequest.width, sizeRequest.height, selectedValue.width, selectedValue.height));
+                    ].join('/'), sizeRequest.width, sizeRequest.height, selectedValue.width, selectedValue.height);
                 }
             }
             // If we have tiles
@@ -885,13 +888,13 @@ var Manifesto;
                     var portrait = this.getHeight() > this.getWidth();
                     var bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
                     var bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
-                    return Promise.resolve(new Manifesto.ThumbnailImage([
+                    return new Manifesto.ThumbnailImage(index, label, [
                         id,
                         region,
                         [bestTileWidth, ''].join(','),
                         rotation,
                         quality + '.jpg' // @todo format against available.
-                    ].join('/'), sizeRequest.width, sizeRequest.height, bestTileWidth, bestTileHeight));
+                    ].join('/'), sizeRequest.width, sizeRequest.height, bestTileWidth, bestTileHeight);
                 }
             }
             if (thumbnailService.profile /* === level 1 or 2 */) {
@@ -937,13 +940,14 @@ var Manifesto;
                 minWidth: 0,
                 minHeight: 0,
             };
+            var label = Manifesto.TranslationCollection.getValue(this.getLabel(), this.options.locale);
             // First check the thumbnail property of the canvas.
             var thumbnail = this.getProperty('thumbnail');
             if (thumbnail && typeof thumbnail !== 'string') {
                 // Check for service
                 if (thumbnail.service) {
                     // We should be able to return something from this, even if its just the ID.
-                    var thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth());
+                    var thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth(), label, this.index);
                     if (thumbnailFromThumbnailService) {
                         return thumbnailFromThumbnailService;
                     }
@@ -956,7 +960,7 @@ var Manifesto;
             var firstImageThumbnail = firstImage.getProperty('thumbnail');
             if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
                 if (firstImageThumbnail.service) {
-                    var thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
+                    var thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth(), label, this.index);
                     if (thumbnailForFirstImageThumbnailService) {
                         return thumbnailForFirstImageThumbnailService;
                     }
@@ -966,7 +970,7 @@ var Manifesto;
             var firstImageServices = firstImage.getProperty('service');
             var firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
             if (firstImageService) {
-                var thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
+                var thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth(), label, this.index);
                 if (thumbnailFromFirstImageService) {
                     return thumbnailFromFirstImageService;
                 }
@@ -974,26 +978,37 @@ var Manifesto;
             // After this point, we could not find a preferred size.
             // 1) if the thumbnail property on the canvas exists as a string, use that.
             if (thumbnail && typeof thumbnail === 'string' && Canvas.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
-                return Promise.resolve(new Manifesto.ThumbnailImage(thumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight()));
+                return new Manifesto.ThumbnailImage(this.index, label, thumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight());
             }
             // 2) if the thumbnail property on the canvas exists, use its ID.
-            if (thumbnail && thumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
-                return Promise.resolve(new Manifesto.ThumbnailImage(thumbnail['@id'], sizeInput.width, sizeInput.height, thumbnail.width || this.getWidth(), thumbnail.height || this.getHeight()));
+            if (thumbnail && (thumbnail['@id'] || thumbnail.id) && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
+                return new Manifesto.ThumbnailImage(this.index, label, thumbnail['@id'] || thumbnail.id, sizeInput.width, sizeInput.height, thumbnail.width || this.getWidth(), thumbnail.height || this.getHeight());
             }
             // 3) if the thumbnail property on the first image exists as a string, use that.
             if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
-                return Promise.resolve(new Manifesto.ThumbnailImage(firstImageThumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight()));
+                return new Manifesto.ThumbnailImage(this.index, label, firstImageThumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight());
             }
             // 4) if the thumbnail property on the first image exists, use its ID.
-            if (firstImageThumbnail && firstImageThumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
-                return Promise.resolve(new Manifesto.ThumbnailImage(firstImageThumbnail['@id'], sizeInput.width, sizeInput.height, firstImageThumbnail.width || this.getWidth(), firstImageThumbnail.height || this.getHeight()));
+            if (firstImageThumbnail && (firstImageThumbnail['@id'] || firstImageThumbnail.id) && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return new Manifesto.ThumbnailImage(this.index, label, firstImageThumbnail['@id'] || firstImageThumbnail.id, sizeInput.width, sizeInput.height, firstImageThumbnail.width || this.getWidth(), firstImageThumbnail.height || this.getHeight());
             }
             // 5) We found nothing, use the ID of the first image.
             // @todo could fallback further to out of bounds images?
-            return Promise.resolve(new Manifesto.ThumbnailImage(firstImage.getProperty('@id'), sizeInput.width, sizeInput.height, firstImage.getWidth() || this.getWidth(), firstImage.getHeight() || this.getHeight()));
+            return new Manifesto.ThumbnailImage(this.index, label, firstImage.getProperty('id'), sizeInput.width, sizeInput.height, firstImage.getWidth() || this.getWidth(), firstImage.getHeight() || this.getHeight());
+        };
+        Canvas.prototype.getThumbnail = function () {
+            var thumbnail = this.getProperty('thumbnail');
+            if (Array.isArray(thumbnail)) {
+                thumbnail = thumbnail[0];
+            }
+            if (thumbnail) {
+                return new Manifesto.Thumbnail(thumbnail, this.options);
+            }
+            return null;
         };
         // http://iiif.io/api/image/2.1/#canonical-uri-syntax
         Canvas.prototype.getCanonicalImageUri = function (w) {
+            console.warn('getCanonicalImageUri will be deprecated, use getThumbnailAtSize instead');
             var id = null;
             var region = 'full';
             var rotation = 0;
@@ -1960,7 +1975,8 @@ var Manifesto;
             var totalCanvases = this.getTotalCanvases();
             for (var i = 0; i < totalCanvases; i++) {
                 var canvas = this.getCanvasByIndex(i);
-                var thumb = new Manifesto.Thumb(width, canvas);
+                var thumb = canvas.getThumbnailAtSize({ width: width, height: height });
+                thumb.data = canvas; // @todo wat.
                 thumbs.push(thumb);
             }
             return thumbs;
@@ -1977,6 +1993,11 @@ var Manifesto;
                 }
             }
             return this._thumbnails;
+        };
+        Sequence.prototype.getThumbnailAtSize = function (sizeRequest) {
+            return this.getCanvases().map(function (canvas) {
+                return canvas.getThumbnailAtSize(sizeRequest);
+            });
         };
         Sequence.prototype.getStartCanvas = function () {
             return this.getProperty('startCanvas');
@@ -3485,12 +3506,14 @@ var Manifesto;
 var Manifesto;
 (function (Manifesto) {
     var ThumbnailImage = /** @class */ (function () {
-        function ThumbnailImage(url, targetWidth, targetHeight, actualWidth, actualHeight) {
-            this.url = url;
+        function ThumbnailImage(index, label, uri, targetWidth, targetHeight, actualWidth, actualHeight) {
+            this.index = index;
+            this.label = label;
+            this.uri = uri;
             this.actualHeight = actualHeight || targetHeight;
             this.actualWidth = actualWidth || targetWidth;
             // One trump card for height/width, IIIF specification.
-            var matches = url.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
+            var matches = uri.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
             if (matches) {
                 var newWidth = (+matches[1]) || this.actualWidth;
                 this.actualHeight = (+matches[2]) || Math.round((this.actualHeight / this.actualWidth) * newWidth);
@@ -3538,7 +3561,7 @@ var Manifesto;
             }
         }
         ThumbnailImage.prototype.toString = function () {
-            return this.url;
+            return this.uri;
         };
         ;
         return ThumbnailImage;

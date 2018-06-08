@@ -1,7 +1,7 @@
 namespace Manifesto {
-    export class ThumbnailImage implements IThumbnailImage {
+    export class ThumbnailImage implements IThumbnailImage, IThumb {
 
-        url: string;
+        uri: string;
 
         height: number;
         width: number;
@@ -10,19 +10,27 @@ namespace Manifesto {
         actualHeight: number;
 
         scale: number;
+        data: any;
+        index: number;
+        label: string;
+        visible: boolean;
 
         constructor(
-            url: string,
+            index: number,
+            label: string,
+            uri: string,
             targetWidth: number,
             targetHeight: number,
             actualWidth?: number,
             actualHeight?: number,
         ) {
-            this.url = url;
+            this.index = index;
+            this.label = label;
+            this.uri = uri;
             this.actualHeight = actualHeight || targetHeight;
             this.actualWidth = actualWidth || targetWidth;
             // One trump card for height/width, IIIF specification.
-            const matches = url.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
+            const matches = uri.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
             if (matches) {
                 const newWidth = (+matches[1]) || this.actualWidth;
                 this.actualHeight = (+matches[2]) || Math.round((this.actualHeight / this.actualWidth) * newWidth);
@@ -71,7 +79,7 @@ namespace Manifesto {
         }
 
         toString() : string {
-            return this.url;
+            return this.uri;
         };
     }
 }

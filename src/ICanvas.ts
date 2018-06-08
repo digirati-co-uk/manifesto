@@ -4,7 +4,7 @@ namespace Manifesto {
 
         //getThumbUri(width: number): string;
         //getType(): CanvasType;
-        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): Promise<ThumbnailImage>;
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): IThumb;
         getCanonicalImageUri(width?: number): string;
         getContent(): IAnnotation[]; // deprecate - use getItems instead
         getDuration(): number | null;

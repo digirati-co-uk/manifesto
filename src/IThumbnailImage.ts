@@ -1,6 +1,10 @@
 namespace Manifesto {
     export interface IThumbnailImage {
-        url: string;
+        data: any;
+        index: number;
+        uri: string;
+        label: string;
+        visible: boolean;
 
         height: number;
         width: number;
