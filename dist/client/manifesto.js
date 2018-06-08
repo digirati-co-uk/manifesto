@@ -814,6 +814,184 @@ var Manifesto;
         function Canvas(jsonld, options) {
             return _super.call(this, jsonld, options) || this;
         }
+        // @todo move to utils.
+        Canvas.prototype.imageServiceToThumbnail = function (sizeRequestInput, thumbnailService, imageWidth) {
+            var sizeRequest = sizeRequestInput instanceof Manifesto.ThumbnailSizeRequest
+                ? sizeRequestInput
+                : new Manifesto.ThumbnailSizeRequest(sizeRequestInput);
+            // For distance function, removes negative sign.
+            var abs = function (n) { return (n < 0) ? ~n + 1 : n; };
+            // Compares distance between two properties from the sizeRequest (width/height)
+            var compareDistanceFromSizeRequest = function (propName) { return function (a, b) {
+                var diffA = abs(a[propName] - sizeRequest[propName]);
+                var diffB = abs(b[propName] - sizeRequest[propName]);
+                if (diffA < diffB) {
+                    return -1;
+                }
+                if (diffA > diffB) {
+                    return 1;
+                }
+                return 0;
+            }; };
+            var id = thumbnailService['@id'] && thumbnailService['@id'].endsWith('/')
+                ? thumbnailService['@id'].substr(0, thumbnailService['@id'].length - 1)
+                : thumbnailService['@id'];
+            var region = 'full';
+            var rotation = 0;
+            var quality = (thumbnailService['@context'] && (thumbnailService['@context'].indexOf('/1.0/context.json') > -1 ||
+                thumbnailService['@context'].indexOf('/1.1/context.json') > -1 ||
+                thumbnailService['@context'].indexOf('/1/context.json') > -1)) ? 'native' : 'default';
+            if (thumbnailService.sizes && thumbnailService.sizes.length) {
+                // We can find the closest size and return.
+                // There is 4 data points that filter data out, and 2 data points that order.
+                // The 4 data points that filter are {min,max}{Height,Width}
+                var suitableSizes = thumbnailService.sizes.filter(function (size) { return (size.height <= sizeRequest.maxHeight &&
+                    size.height >= sizeRequest.minHeight &&
+                    size.width <= sizeRequest.maxWidth &&
+                    size.width >= sizeRequest.minWidth); });
+                if (suitableSizes.length) {
+                    // At this point we will definitely be returning an image, we just need to choose the right one.
+                    // First order both by height and width (closest to request)
+                    var heightFirst = suitableSizes.sort(compareDistanceFromSizeRequest('height'))[0];
+                    var widthFirst = suitableSizes.sort(compareDistanceFromSizeRequest('width'))[0];
+                    // If they agree, just pick one. If not choose the closest (pixel-wise).
+                    // Maybe we should just choose the largest one. @todo review.
+                    var selectedValue = heightFirst === widthFirst
+                        ? (widthFirst)
+                        : (abs(widthFirst.width - sizeRequest.width) < abs(heightFirst.height - sizeRequest.height)
+                            ? widthFirst
+                            : heightFirst);
+                    return Promise.resolve(new Manifesto.ThumbnailImage([
+                        id,
+                        region,
+                        [selectedValue.width, selectedValue.height].join(','),
+                        rotation,
+                        quality + '.jpg' // @todo format against available.
+                    ].join('/'), sizeRequest.width, sizeRequest.height, selectedValue.width, selectedValue.height));
+                }
+            }
+            // If we have tiles
+            if (thumbnailService.tiles) {
+                var suitableTile = thumbnailService.tiles.filter(function (tile) { return (
+                // Scale factor can encapsulate whole image.
+                Math.max.apply(Math, tile.scaleFactors) * tile.width >= imageWidth &&
+                    // Within bounds
+                    tile.width >= sizeRequest.minWidth &&
+                    tile.width <= sizeRequest.maxWidth); }, []);
+                if (suitableTile.length) {
+                    // Within our bounds and scale factor compatible.
+                    var bestTile = suitableTile.sort(compareDistanceFromSizeRequest('width'))[0];
+                    var ratio = this.getWidth() / this.getHeight();
+                    var portrait = this.getHeight() > this.getWidth();
+                    var bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
+                    var bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
+                    return Promise.resolve(new Manifesto.ThumbnailImage([
+                        id,
+                        region,
+                        [bestTileWidth, ''].join(','),
+                        rotation,
+                        quality + '.jpg' // @todo format against available.
+                    ].join('/'), sizeRequest.width, sizeRequest.height, bestTileWidth, bestTileHeight));
+                }
+            }
+            if (thumbnailService.profile /* === level 1 or 2 */) {
+                // If we have a profile over level 0
+            }
+            if (sizeRequestInput.follow) {
+                // If we have follow set to true, we can load the info.json and try to load that.
+            }
+            return null;
+        };
+        Canvas.thumbnailInBounds = function (sizeInput, thumbnail) {
+            return (thumbnail.width || Infinity) >= (sizeInput.minWidth || 0) &&
+                (thumbnail.width || 0) <= (sizeInput.maxWidth || Infinity) &&
+                (thumbnail.height || Infinity) >= (sizeInput.minHeight || 0) &&
+                (thumbnail.height || 0) <= (sizeInput.maxHeight || Infinity);
+        };
+        /**
+         * Get thumbnail at a specific size.
+         *
+         * This will check the following places in order for a suitable thumbnail at a preferred size.
+         *
+         * - Thumbnail service on canvas
+         * - Thumbnail service on first image
+         * - Image service on first image
+         *
+         * If we can't find a preferred size, we fallback to the following in order:
+         * - Thumbnail property on canvas (string)
+         * - Thumbnail property on first image (string)
+         * - Thumbnail ID on canvas
+         * - Thumbnail ID on first image
+         * - First image ID.
+         *
+         * If you pass in `{ follow: true }` into the configuration, then it will follow the thumbnail services
+         * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
+         * Note: This option is off by default, to avoid multiple requests per thumbnail.
+         */
+        Canvas.prototype.getThumbnailAtSize = function (sizeRequestInput) {
+            var sizeInput = sizeRequestInput || this.options.defaultThumbnailOptions || {
+                width: 100,
+                height: 150,
+                maxWidth: 150,
+                maxHeight: 150,
+                minWidth: 0,
+                minHeight: 0,
+            };
+            // First check the thumbnail property of the canvas.
+            var thumbnail = this.getProperty('thumbnail');
+            if (thumbnail && typeof thumbnail !== 'string') {
+                // Check for service
+                if (thumbnail.service) {
+                    // We should be able to return something from this, even if its just the ID.
+                    var thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth());
+                    if (thumbnailFromThumbnailService) {
+                        return thumbnailFromThumbnailService;
+                    }
+                    // Fall through to check first image.
+                }
+            }
+            // In the case of no thumbnail property, try the first image.
+            var firstImage = this.getImages()[0].getResource();
+            // First image thumbnail service.
+            var firstImageThumbnail = firstImage.getProperty('thumbnail');
+            if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
+                if (firstImageThumbnail.service) {
+                    var thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth());
+                    if (thumbnailForFirstImageThumbnailService) {
+                        return thumbnailForFirstImageThumbnailService;
+                    }
+                }
+            }
+            // First image service.
+            var firstImageServices = firstImage.getProperty('service');
+            var firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
+            if (firstImageService) {
+                var thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth());
+                if (thumbnailFromFirstImageService) {
+                    return thumbnailFromFirstImageService;
+                }
+            }
+            // After this point, we could not find a preferred size.
+            // 1) if the thumbnail property on the canvas exists as a string, use that.
+            if (thumbnail && typeof thumbnail === 'string' && Canvas.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
+                return Promise.resolve(new Manifesto.ThumbnailImage(thumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight()));
+            }
+            // 2) if the thumbnail property on the canvas exists, use its ID.
+            if (thumbnail && thumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
+                return Promise.resolve(new Manifesto.ThumbnailImage(thumbnail['@id'], sizeInput.width, sizeInput.height, thumbnail.width || this.getWidth(), thumbnail.height || this.getHeight()));
+            }
+            // 3) if the thumbnail property on the first image exists as a string, use that.
+            if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
+                return Promise.resolve(new Manifesto.ThumbnailImage(firstImageThumbnail, sizeInput.width, sizeInput.height, this.getWidth(), this.getHeight()));
+            }
+            // 4) if the thumbnail property on the first image exists, use its ID.
+            if (firstImageThumbnail && firstImageThumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return Promise.resolve(new Manifesto.ThumbnailImage(firstImageThumbnail['@id'], sizeInput.width, sizeInput.height, firstImageThumbnail.width || this.getWidth(), firstImageThumbnail.height || this.getHeight()));
+            }
+            // 5) We found nothing, use the ID of the first image.
+            // @todo could fallback further to out of bounds images?
+            return Promise.resolve(new Manifesto.ThumbnailImage(firstImage.getProperty('@id'), sizeInput.width, sizeInput.height, firstImage.getWidth() || this.getWidth(), firstImage.getHeight() || this.getHeight()));
+        };
         // http://iiif.io/api/image/2.1/#canonical-uri-syntax
         Canvas.prototype.getCanonicalImageUri = function (w) {
             var id = null;
@@ -3280,6 +3458,8 @@ var Manifesto;
 
 
 
+
+
 var __extends = (this && this.__extends) || (function () {
     var extendStatics = Object.setPrototypeOf ||
         ({ __proto__: [] } instanceof Array && function (d, b) { d.__proto__ = b; }) ||
@@ -3300,6 +3480,87 @@ var Manifesto;
         return Thumbnail;
     }(Manifesto.Resource));
     Manifesto.Thumbnail = Thumbnail;
+})(Manifesto || (Manifesto = {}));
+
+var Manifesto;
+(function (Manifesto) {
+    var ThumbnailImage = /** @class */ (function () {
+        function ThumbnailImage(url, targetWidth, targetHeight, actualWidth, actualHeight) {
+            this.url = url;
+            this.actualHeight = actualHeight || targetHeight;
+            this.actualWidth = actualWidth || targetWidth;
+            // One trump card for height/width, IIIF specification.
+            var matches = url.match(/full\/([0-9]+),([0-9]+)?\/\d\/\w+/);
+            if (matches) {
+                var newWidth = (+matches[1]) || this.actualWidth;
+                this.actualHeight = (+matches[2]) || Math.round((this.actualHeight / this.actualWidth) * newWidth);
+                this.actualWidth = newWidth;
+            }
+            if ((actualHeight && actualWidth) || this.actualWidth !== targetWidth || this.actualHeight !== targetHeight) {
+                /**
+                 *   |------|       |----------|
+                 *   |      |       |          |
+                 *   |------|       |----------|
+                 *  100 / 100   >    150 / 100
+                 *  =   1       >       1.5
+                 *  =   false
+                 *
+                 *  target: 150x100 scaled down to: 100x66.67 to fit in 100x100
+                 *  |––––––––––|
+                 *  |----------|
+                 *  |          |
+                 *  |----------|
+                 *  |——————————|
+                 *
+                 *   |------|       |--------|
+                 *   |      |       |        |
+                 *   |------|       |        |
+                 *                  |--------|
+                 *  100 / 100   >    100 / 150
+                 *  =   1       >       0.6667
+                 *  =   true
+                 *
+                 *  target: 100x150 scaled down to: 66.67x100 to fit in 100x100
+                 *  |—|–––––––|—|
+                 *  | |       | |
+                 *  | |       | |
+                 *  |—|———————|—|
+                 */
+                var cropHeight = (targetWidth / targetHeight) < (this.actualWidth / this.actualHeight);
+                this.width = Math.round(cropHeight ? targetWidth : targetHeight * (this.actualWidth / this.actualHeight));
+                this.height = Math.round(cropHeight ? targetWidth * (this.actualHeight / this.actualWidth) : targetHeight);
+                this.scale = +(cropHeight ? this.actualWidth / targetWidth : this.actualHeight / targetHeight).toFixed(2);
+            }
+            else {
+                this.height = targetHeight;
+                this.width = targetWidth;
+                this.scale = 1;
+            }
+        }
+        ThumbnailImage.prototype.toString = function () {
+            return this.url;
+        };
+        ;
+        return ThumbnailImage;
+    }());
+    Manifesto.ThumbnailImage = ThumbnailImage;
+})(Manifesto || (Manifesto = {}));
+
+var Manifesto;
+(function (Manifesto) {
+    var ThumbnailSizeRequest = /** @class */ (function () {
+        function ThumbnailSizeRequest(obj) {
+            this.width = obj.width;
+            this.height = obj.height;
+            this.maxWidth = obj.maxWidth || Infinity;
+            this.maxHeight = obj.maxHeight || Infinity;
+            this.minHeight = obj.minHeight || 1;
+            this.minWidth = obj.minWidth || 1;
+            this.follow = !!obj.follow;
+        }
+        return ThumbnailSizeRequest;
+    }());
+    Manifesto.ThumbnailSizeRequest = ThumbnailSizeRequest;
 })(Manifesto || (Manifesto = {}));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
@@ -5890,6 +6151,54 @@ module.exports = Array.isArray || function (arr) {
 };
 
 },{}],13:[function(require,module,exports){
+(function (process){
+'use strict';
+
+if (!process.version ||
+    process.version.indexOf('v0.') === 0 ||
+    process.version.indexOf('v1.') === 0 && process.version.indexOf('v1.8.') !== 0) {
+  module.exports = { nextTick: nextTick };
+} else {
+  module.exports = process
+}
+
+function nextTick(fn, arg1, arg2, arg3) {
+  if (typeof fn !== 'function') {
+    throw new TypeError('"callback" argument must be a function');
+  }
+  var len = arguments.length;
+  var args, i;
+  switch (len) {
+  case 0:
+  case 1:
+    return process.nextTick(fn);
+  case 2:
+    return process.nextTick(function afterTickOne() {
+      fn.call(null, arg1);
+    });
+  case 3:
+    return process.nextTick(function afterTickTwo() {
+      fn.call(null, arg1, arg2);
+    });
+  case 4:
+    return process.nextTick(function afterTickThree() {
+      fn.call(null, arg1, arg2, arg3);
+    });
+  default:
+    args = new Array(len - 1);
+    i = 0;
+    while (i < args.length) {
+      args[i++] = arguments[i];
+    }
+    return process.nextTick(function afterTick() {
+      fn.apply(null, args);
+    });
+  }
+}
+
+
+}).call(this,require('_process'))
+},{"_process":14}],14:[function(require,module,exports){
 // shim for using process in browser
 var process = module.exports = {};
 
@@ -6075,7 +6384,7 @@ process.chdir = function (dir) {
 };
 process.umask = function() { return 0; };
 
-},{}],14:[function(require,module,exports){
+},{}],15:[function(require,module,exports){
 (function (global){
 /*! https://mths.be/punycode v1.4.1 by @mathias */
 ;(function(root) {
@@ -6612,7 +6921,7 @@ process.umask = function() { return 0; };
 }(this));
 
 }).call(this,typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],15:[function(require,module,exports){
+},{}],16:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6698,7 +7007,7 @@ var isArray = Array.isArray || function (xs) {
   return Object.prototype.toString.call(xs) === '[object Array]';
 };
 
-},{}],16:[function(require,module,exports){
+},{}],17:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6785,13 +7094,13 @@ var objectKeys = Object.keys || function (obj) {
   return res;
 };
 
-},{}],17:[function(require,module,exports){
+},{}],18:[function(require,module,exports){
 'use strict';
 
 exports.decode = exports.parse = require('./decode');
 exports.encode = exports.stringify = require('./encode');
 
-},{"./decode":15,"./encode":16}],18:[function(require,module,exports){
+},{"./decode":16,"./encode":17}],19:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6923,7 +7232,7 @@ Duplex.prototype._destroy = function (err, cb) {
 
   pna.nextTick(cb, err);
 };
-},{"./_stream_readable":20,"./_stream_writable":22,"core-util-is":6,"inherits":10,"process-nextick-args":26}],19:[function(require,module,exports){
+},{"./_stream_readable":21,"./_stream_writable":23,"core-util-is":6,"inherits":10,"process-nextick-args":13}],20:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -6971,7 +7280,7 @@ function PassThrough(options) {
 PassThrough.prototype._transform = function (chunk, encoding, cb) {
   cb(null, chunk);
 };
-},{"./_stream_transform":21,"core-util-is":6,"inherits":10}],20:[function(require,module,exports){
+},{"./_stream_transform":22,"core-util-is":6,"inherits":10}],21:[function(require,module,exports){
 (function (process,global){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -7993,7 +8302,7 @@ function indexOf(xs, x) {
   return -1;
 }
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{"./_stream_duplex":18,"./internal/streams/BufferList":23,"./internal/streams/destroy":24,"./internal/streams/stream":25,"_process":13,"core-util-is":6,"events":7,"inherits":10,"isarray":12,"process-nextick-args":26,"safe-buffer":29,"string_decoder/":27,"util":3}],21:[function(require,module,exports){
+},{"./_stream_duplex":19,"./internal/streams/BufferList":24,"./internal/streams/destroy":25,"./internal/streams/stream":26,"_process":14,"core-util-is":6,"events":7,"inherits":10,"isarray":12,"process-nextick-args":13,"safe-buffer":29,"string_decoder/":27,"util":3}],22:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -8208,7 +8517,7 @@ function done(stream, er, data) {
 
   return stream.push(null);
 }
-},{"./_stream_duplex":18,"core-util-is":6,"inherits":10}],22:[function(require,module,exports){
+},{"./_stream_duplex":19,"core-util-is":6,"inherits":10}],23:[function(require,module,exports){
 (function (process,global,setImmediate){
 // Copyright Joyent, Inc. and other Node contributors.
 //
@@ -8898,7 +9207,7 @@ Writable.prototype._destroy = function (err, cb) {
   cb(err);
 };
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("timers").setImmediate)
-},{"./_stream_duplex":18,"./internal/streams/destroy":24,"./internal/streams/stream":25,"_process":13,"core-util-is":6,"inherits":10,"process-nextick-args":26,"safe-buffer":29,"timers":34,"util-deprecate":38}],23:[function(require,module,exports){
+},{"./_stream_duplex":19,"./internal/streams/destroy":25,"./internal/streams/stream":26,"_process":14,"core-util-is":6,"inherits":10,"process-nextick-args":13,"safe-buffer":29,"timers":34,"util-deprecate":38}],24:[function(require,module,exports){
 'use strict';
 
 function _classCallCheck(instance, Constructor) { if (!(instance instanceof Constructor)) { throw new TypeError("Cannot call a class as a function"); } }
@@ -8978,7 +9287,7 @@ if (util && util.inspect && util.inspect.custom) {
     return this.constructor.name + ' ' + obj;
   };
 }
-},{"safe-buffer":29,"util":3}],24:[function(require,module,exports){
+},{"safe-buffer":29,"util":3}],25:[function(require,module,exports){
 'use strict';
 
 /*<replacement>*/
@@ -9053,58 +9362,10 @@ module.exports = {
   destroy: destroy,
   undestroy: undestroy
 };
-},{"process-nextick-args":26}],25:[function(require,module,exports){
+},{"process-nextick-args":13}],26:[function(require,module,exports){
 module.exports = require('events').EventEmitter;
 
-},{"events":7}],26:[function(require,module,exports){
-(function (process){
-'use strict';
-
-if (!process.version ||
-    process.version.indexOf('v0.') === 0 ||
-    process.version.indexOf('v1.') === 0 && process.version.indexOf('v1.8.') !== 0) {
-  module.exports = { nextTick: nextTick };
-} else {
-  module.exports = process
-}
-
-function nextTick(fn, arg1, arg2, arg3) {
-  if (typeof fn !== 'function') {
-    throw new TypeError('"callback" argument must be a function');
-  }
-  var len = arguments.length;
-  var args, i;
-  switch (len) {
-  case 0:
-  case 1:
-    return process.nextTick(fn);
-  case 2:
-    return process.nextTick(function afterTickOne() {
-      fn.call(null, arg1);
-    });
-  case 3:
-    return process.nextTick(function afterTickTwo() {
-      fn.call(null, arg1, arg2);
-    });
-  case 4:
-    return process.nextTick(function afterTickThree() {
-      fn.call(null, arg1, arg2, arg3);
-    });
-  default:
-    args = new Array(len - 1);
-    i = 0;
-    while (i < args.length) {
-      args[i++] = arguments[i];
-    }
-    return process.nextTick(function afterTick() {
-      fn.apply(null, args);
-    });
-  }
-}
-
-
-}).call(this,require('_process'))
-},{"_process":13}],27:[function(require,module,exports){
+},{"events":7}],27:[function(require,module,exports){
 // Copyright Joyent, Inc. and other Node contributors.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a
@@ -9410,7 +9671,7 @@ exports.Duplex = require('./lib/_stream_duplex.js');
 exports.Transform = require('./lib/_stream_transform.js');
 exports.PassThrough = require('./lib/_stream_passthrough.js');
 
-},{"./lib/_stream_duplex.js":18,"./lib/_stream_passthrough.js":19,"./lib/_stream_readable.js":20,"./lib/_stream_transform.js":21,"./lib/_stream_writable.js":22}],29:[function(require,module,exports){
+},{"./lib/_stream_duplex.js":19,"./lib/_stream_passthrough.js":20,"./lib/_stream_readable.js":21,"./lib/_stream_transform.js":22,"./lib/_stream_writable.js":23}],29:[function(require,module,exports){
 /* eslint-disable node/no-deprecated-api */
 var buffer = require('buffer')
 var Buffer = buffer.Buffer
@@ -9970,7 +10231,7 @@ var unsafeHeaders = [
 ]
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"./capability":31,"./response":33,"_process":13,"buffer":4,"inherits":10,"readable-stream":28,"to-arraybuffer":35}],33:[function(require,module,exports){
+},{"./capability":31,"./response":33,"_process":14,"buffer":4,"inherits":10,"readable-stream":28,"to-arraybuffer":35}],33:[function(require,module,exports){
 (function (process,global,Buffer){
 var capability = require('./capability')
 var inherits = require('inherits')
@@ -10198,7 +10459,7 @@ IncomingMessage.prototype._onXHRProgress = function () {
 }
 
 }).call(this,require('_process'),typeof global !== "undefined" ? global : typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"./capability":31,"_process":13,"buffer":4,"inherits":10,"readable-stream":28}],34:[function(require,module,exports){
+},{"./capability":31,"_process":14,"buffer":4,"inherits":10,"readable-stream":28}],34:[function(require,module,exports){
 (function (setImmediate,clearImmediate){
 var nextTick = require('process/browser.js').nextTick;
 var apply = Function.prototype.apply;
@@ -10277,7 +10538,7 @@ exports.clearImmediate = typeof clearImmediate === "function" ? clearImmediate :
   delete immediateIds[id];
 };
 }).call(this,require("timers").setImmediate,require("timers").clearImmediate)
-},{"process/browser.js":13,"timers":34}],35:[function(require,module,exports){
+},{"process/browser.js":14,"timers":34}],35:[function(require,module,exports){
 var Buffer = require('buffer').Buffer
 
 module.exports = function (buf) {
@@ -11040,7 +11301,7 @@ Url.prototype.parseHost = function() {
   if (host) this.hostname = host;
 };
 
-},{"./util":37,"punycode":14,"querystring":17}],37:[function(require,module,exports){
+},{"./util":37,"punycode":15,"querystring":18}],37:[function(require,module,exports){
 'use strict';
 
 module.exports = {

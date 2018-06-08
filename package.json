@@ -6,6 +6,8 @@
   "types": "./dist/manifesto.d.ts",
   "scripts": {
     "build": "gulp",
+    "test": "gulp test && jest",
+    "ci": "npm run build && npm test",
     "watch": "npm-watch"
   },
   "watch": {
@@ -31,6 +33,7 @@
   },
   "homepage": "https://github.com/iiif-commons/manifesto",
   "devDependencies": {
+    "@types/jest": "^23.0.0",
     "@types/node": "^8.0.53",
     "browserify": "13.0.1",
     "chai": "2.3.0",
@@ -48,12 +51,14 @@
     "gulp-uglify": "2.1.2",
     "gulp-utils": "iiif-commons/gulp-utils#v1.0.0",
     "http": "0.0.0",
+    "jest": "^23.1.0",
     "merge2": "0.3.5",
     "mocha": "2.2.4",
     "require-dir": "0.3.0",
     "run-sequence": "1.1.0",
     "serve-static": "1.10.0",
     "through2": "2.0.1",
+    "ts-jest": "^22.4.6",
     "typescript": "2.5.3",
     "yargs": "3.10.0"
   },
@@ -64,5 +69,24 @@
   },
   "directories": {
     "test": "test"
+  },
+  "jest": {
+    "globals": {
+      "ts-jest": {
+        "enableTsDiagnostics": true
+      }
+    },
+    "transform": {
+      "^.+\\.tsx?$": "ts-jest"
+    },
+    "testRegex": "(/(__tests__)/.*|(\\.|/)(test|spec)?)\\.(jsx?|tsx?)$",
+    "moduleFileExtensions": [
+      "ts",
+      "tsx",
+      "js",
+      "jsx",
+      "json",
+      "node"
+    ]
   }
 }

@@ -8,15 +8,11 @@ namespace Manifesto {
         }
 
         // @todo move to utils.
-        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number): ThumbnailImage | null {
-            const sizeRequest = Object.assign({
-                height: this.getHeight(),
-                width: this.getWidth(),
-                maxHeight: Infinity,
-                maxWidth: Infinity,
-                minWidth: 1,
-                minHeight: 1,
-            }, sizeRequestInput);
+        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number): Promise<ThumbnailImage> | null {
+            const sizeRequest = sizeRequestInput instanceof ThumbnailSizeRequest
+                ? sizeRequestInput
+                : new ThumbnailSizeRequest(sizeRequestInput);
+
             // For distance function, removes negative sign.
             const abs = n => (n < 0) ? ~n+1 : n;
             // Compares distance between two properties from the sizeRequest (width/height)
@@ -68,18 +64,20 @@ namespace Manifesto {
                                 : heightFirst
                         );
 
-                    return new ThumbnailImage(
-                        [
-                            id,
-                            region,
-                            [selectedValue.width, selectedValue.height].join(','),
-                            rotation,
-                            quality + '.jpg' // @todo format against available.
-                        ].join('/'),
-                        sizeRequest.width,
-                        sizeRequest.height,
-                        selectedValue.width,
-                        selectedValue.height,
+                    return Promise.resolve(
+                        new ThumbnailImage(
+                            [
+                                id,
+                                region,
+                                [selectedValue.width, selectedValue.height].join(','),
+                                rotation,
+                                quality + '.jpg' // @todo format against available.
+                            ].join('/'),
+                            sizeRequest.width,
+                            sizeRequest.height,
+                            selectedValue.width,
+                            selectedValue.height,
+                        )
                     );
                 }
             }
@@ -101,18 +99,20 @@ namespace Manifesto {
                     const bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
                     const bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
 
-                    return new ThumbnailImage(
-                        [
-                            id,
-                            region,
-                            [bestTileWidth, ''].join(','),
-                            rotation,
-                            quality + '.jpg' // @todo format against available.
-                        ].join('/'),
-                        sizeRequest.width,
-                        sizeRequest.height,
-                        bestTileWidth,
-                        bestTileHeight,
+                    return Promise.resolve(
+                        new ThumbnailImage(
+                            [
+                                id,
+                                region,
+                                [bestTileWidth, ''].join(','),
+                                rotation,
+                                quality + '.jpg' // @todo format against available.
+                            ].join('/'),
+                            sizeRequest.width,
+                            sizeRequest.height,
+                            bestTileWidth,
+                            bestTileHeight,
+                        )
                     );
                 }
             }
@@ -128,7 +128,7 @@ namespace Manifesto {
             return null;
         }
 
-        thumbnailInBounds(sizeInput: IThumbnailSizeRequest, thumbnail) {
+        static thumbnailInBounds(sizeInput: IThumbnailSizeRequest, thumbnail) {
             return (thumbnail.width || Infinity) >= (sizeInput.minWidth || 0) &&
                 (thumbnail.width || 0) <= (sizeInput.maxWidth || Infinity) &&
                 (thumbnail.height || Infinity) >= (sizeInput.minHeight || 0) &&
@@ -155,7 +155,7 @@ namespace Manifesto {
          * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
          * Note: This option is off by default, to avoid multiple requests per thumbnail.
          */
-        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): ThumbnailImage {
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): Promise<ThumbnailImage> {
             const sizeInput: IThumbnailSizeRequest = sizeRequestInput || this.options.defaultThumbnailOptions || {
                 width: 100,
                 height: 150,
@@ -205,57 +205,67 @@ namespace Manifesto {
 
             // After this point, we could not find a preferred size.
             // 1) if the thumbnail property on the canvas exists as a string, use that.
-            if (thumbnail && typeof thumbnail === 'string' && this.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
-                return new ThumbnailImage(
-                    thumbnail,
-                    sizeInput.width,
-                    sizeInput.height,
-                    this.getWidth(),
-                    this.getHeight(),
+            if (thumbnail && typeof thumbnail === 'string' && Canvas.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
+                return Promise.resolve(
+                    new ThumbnailImage(
+                        thumbnail,
+                        sizeInput.width,
+                        sizeInput.height,
+                        this.getWidth(),
+                        this.getHeight(),
+                    )
                 );
             }
 
             // 2) if the thumbnail property on the canvas exists, use its ID.
-            if (thumbnail && thumbnail['@id'] && this.thumbnailInBounds(sizeInput, thumbnail)) {
-                return new ThumbnailImage(
-                    thumbnail['@id'],
-                    sizeInput.width,
-                    sizeInput.height,
-                    thumbnail.width || this.getWidth(),
-                    thumbnail.height || this.getHeight(),
+            if (thumbnail && thumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
+                return Promise.resolve(
+                    new ThumbnailImage(
+                        thumbnail['@id'],
+                        sizeInput.width,
+                        sizeInput.height,
+                        thumbnail.width || this.getWidth(),
+                        thumbnail.height || this.getHeight(),
+                    )
                 );
             }
 
             // 3) if the thumbnail property on the first image exists as a string, use that.
             if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
-                return new ThumbnailImage(
-                    firstImageThumbnail,
-                    sizeInput.width,
-                    sizeInput.height,
-                    this.getWidth(),
-                    this.getHeight(),
+                return Promise.resolve(
+                    new ThumbnailImage(
+                        firstImageThumbnail,
+                        sizeInput.width,
+                        sizeInput.height,
+                        this.getWidth(),
+                        this.getHeight(),
+                    )
                 );
             }
 
             // 4) if the thumbnail property on the first image exists, use its ID.
-            if (firstImageThumbnail && firstImageThumbnail['@id'] && this.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
-                return new ThumbnailImage(
-                    firstImageThumbnail['@id'],
-                    sizeInput.width,
-                    sizeInput.height,
-                    firstImageThumbnail.width || this.getWidth(),
-                    firstImageThumbnail.height || this.getHeight(),
+            if (firstImageThumbnail && firstImageThumbnail['@id'] && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return Promise.resolve(
+                    new ThumbnailImage(
+                        firstImageThumbnail['@id'],
+                        sizeInput.width,
+                        sizeInput.height,
+                        firstImageThumbnail.width || this.getWidth(),
+                        firstImageThumbnail.height || this.getHeight(),
+                    )
                 );
             }
 
             // 5) We found nothing, use the ID of the first image.
             // @todo could fallback further to out of bounds images?
-            return new ThumbnailImage(
-                firstImage.getProperty('@id'),
-                sizeInput.width,
-                sizeInput.height,
-                firstImage.getWidth() || this.getWidth(),
-                firstImage.getHeight() || this.getHeight(),
+            return Promise.resolve(
+                new ThumbnailImage(
+                    firstImage.getProperty('@id'),
+                    sizeInput.width,
+                    sizeInput.height,
+                    firstImage.getWidth() || this.getWidth(),
+                    firstImage.getHeight() || this.getHeight(),
+                )
             );
         }
 
