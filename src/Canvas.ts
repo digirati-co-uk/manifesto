@@ -7,9 +7,291 @@ namespace Manifesto {
             super(jsonld, options);
         }
 
+        // @todo move to utils.
+        private imageServiceToThumbnail(sizeRequestInput: IThumbnailSizeRequest, thumbnailService: any, imageWidth: number, label: string, index: number): IThumb | null {
+            const sizeRequest = sizeRequestInput instanceof ThumbnailSizeRequest
+                ? sizeRequestInput
+                : new ThumbnailSizeRequest(sizeRequestInput);
+
+            const getProperty = prop => obj => obj['@'+prop] ? obj['@'+prop] : obj[prop];
+            const getId = getProperty('id');
+            const getContext = getProperty('context');
+
+            // For distance function, removes negative sign.
+            const abs = n => (n < 0) ? ~n+1 : n;
+            // Compares distance between two properties from the sizeRequest (width/height)
+            const compareDistanceFromSizeRequest = propName => (a, b) => {
+                const diffA = abs(a[propName] - sizeRequest[propName]);
+                const diffB = abs(b[propName] - sizeRequest[propName]);
+                if (diffA < diffB) {
+                    return -1;
+                }
+                if (diffA > diffB) {
+                    return 1;
+                }
+                return 0;
+            };
+            const id = getId(thumbnailService) && getId(thumbnailService).endsWith('/')
+                ? getId(thumbnailService).substr(0, getId(thumbnailService).length - 1)
+                : getId(thumbnailService);
+            const region: string = 'full';
+            const rotation: number = 0;
+            const quality: string = (getContext(thumbnailService) && (getContext(thumbnailService).indexOf('/1.0/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1.1/context.json') > -1 ||
+                getContext(thumbnailService).indexOf('/1/context.json') > -1 )) ? 'native' : 'default';
+
+            if (thumbnailService.sizes && thumbnailService.sizes.length) {
+                // We can find the closest size and return.
+
+                // There is 4 data points that filter data out, and 2 data points that order.
+                // The 4 data points that filter are {min,max}{Height,Width}
+                const suitableSizes = thumbnailService.sizes.filter(size => (
+                    size.height <= sizeRequest.maxHeight &&
+                    size.height >= sizeRequest.minHeight &&
+                    size.width <= sizeRequest.maxWidth &&
+                    size.width >= sizeRequest.minWidth
+                ));
+
+                if (suitableSizes.length) {
+                    // At this point we will definitely be returning an image, we just need to choose the right one.
+                    // First order both by height and width (closest to request)
+                    const heightFirst = suitableSizes.sort(compareDistanceFromSizeRequest('height'))[0];
+                    const widthFirst = suitableSizes.sort(compareDistanceFromSizeRequest('width'))[0];
+
+                    // If they agree, just pick one. If not choose the closest (pixel-wise).
+                    // Maybe we should just choose the largest one. @todo review.
+                    const selectedValue = heightFirst === widthFirst
+                        ? (widthFirst)
+                        : (
+                            abs(widthFirst.width - sizeRequest.width) < abs(heightFirst.height - sizeRequest.height)
+                                ? widthFirst
+                                : heightFirst
+                        );
+
+                    return new ThumbnailImage(
+                        index,
+                        label,
+                        [
+                            id,
+                            region,
+                            [selectedValue.width, selectedValue.height].join(','),
+                            rotation,
+                            quality + '.jpg' // @todo format against available.
+                        ].join('/'),
+                        sizeRequest.width,
+                        sizeRequest.height,
+                        selectedValue.width,
+                        selectedValue.height,
+                    );
+                }
+            }
+
+            // If we have tiles
+            if (thumbnailService.tiles) {
+                const suitableTile = thumbnailService.tiles.filter(tile => (
+                    // Scale factor can encapsulate whole image.
+                    Math.max(...tile.scaleFactors) * tile.width >= imageWidth &&
+                    // Within bounds
+                    tile.width >= sizeRequest.minWidth &&
+                    tile.width <= sizeRequest.maxWidth
+                ), []);
+                if (suitableTile.length) {
+                    // Within our bounds and scale factor compatible.
+                    const bestTile = suitableTile.sort(compareDistanceFromSizeRequest('width'))[0];
+                    const ratio = this.getWidth() / this.getHeight();
+                    const portrait = this.getHeight() > this.getWidth();
+                    const bestTileHeight = portrait ? bestTile.width : Math.round(bestTile.width * ratio);
+                    const bestTileWidth = portrait ? Math.round(bestTile.width * ratio) : bestTile.width;
+
+
+                    return new ThumbnailImage(
+                        index,
+                        label,
+                        [
+                            id,
+                            region,
+                            [bestTileWidth, ''].join(','),
+                            rotation,
+                            quality + '.jpg' // @todo format against available.
+                        ].join('/'),
+                        sizeRequest.width,
+                        sizeRequest.height,
+                        bestTileWidth,
+                        bestTileHeight,
+                    );
+                }
+            }
+
+            if (thumbnailService.profile /* === level 1 or 2 */) {
+                // If we have a profile over level 0
+            }
+
+            if (sizeRequestInput.follow) {
+                // If we have follow set to true, we can load the info.json and try to load that.
+            }
+
+            return null;
+        }
+
+        static thumbnailInBounds(sizeInput: IThumbnailSizeRequest, thumbnail) {
+            return (thumbnail.width || Infinity) >= (sizeInput.minWidth || 0) &&
+                (thumbnail.width || 0) <= (sizeInput.maxWidth || Infinity) &&
+                (thumbnail.height || Infinity) >= (sizeInput.minHeight || 0) &&
+                (thumbnail.height || 0) <= (sizeInput.maxHeight || Infinity);
+        }
+
+        /**
+         * Get thumbnail at a specific size.
+         *
+         * This will check the following places in order for a suitable thumbnail at a preferred size.
+         *
+         * - Thumbnail service on canvas
+         * - Thumbnail service on first image
+         * - Image service on first image
+         *
+         * If we can't find a preferred size, we fallback to the following in order:
+         * - Thumbnail property on canvas (string)
+         * - Thumbnail property on first image (string)
+         * - Thumbnail ID on canvas
+         * - Thumbnail ID on first image
+         * - First image ID.
+         *
+         * If you pass in `{ follow: true }` into the configuration, then it will follow the thumbnail services
+         * to try and find a best size. This is sometimes required to get exact thumbnail sizes.
+         * Note: This option is off by default, to avoid multiple requests per thumbnail.
+         */
+        getThumbnailAtSize(sizeRequestInput?: IThumbnailSizeRequest): IThumb {
+            const sizeInput: IThumbnailSizeRequest = sizeRequestInput || this.options.defaultThumbnailOptions || {
+                width: 100,
+                height: 150,
+                maxWidth: 150,
+                maxHeight: 150,
+                minWidth: 0,
+                minHeight: 0,
+            };
+            const label = <string>TranslationCollection.getValue(this.getLabel(), this.options.locale);
+
+            // First check the thumbnail property of the canvas.
+            const thumbnail = this.getProperty('thumbnail');
+            if (thumbnail && typeof thumbnail !== 'string') {
+                // Check for service
+                if (thumbnail.service) {
+                    // We should be able to return something from this, even if its just the ID.
+                    const thumbnailFromThumbnailService = this.imageServiceToThumbnail(sizeInput, thumbnail.service, this.getWidth(), label, this.index);
+                    if (thumbnailFromThumbnailService) {
+                        return thumbnailFromThumbnailService;
+                    }
+                    // Fall through to check first image.
+                }
+            }
+
+            // In the case of no thumbnail property, try the first image.
+            const firstImage: Resource = this.getImages()[0].getResource();
+
+            // First image thumbnail service.
+            const firstImageThumbnail = firstImage.getProperty('thumbnail');
+            if (firstImageThumbnail && typeof firstImageThumbnail !== 'string') {
+                if (firstImageThumbnail.service) {
+                    const thumbnailForFirstImageThumbnailService = this.imageServiceToThumbnail(sizeInput, firstImageThumbnail.service, firstImage.getWidth(), label, this.index);
+                    if (thumbnailForFirstImageThumbnailService) {
+                        return thumbnailForFirstImageThumbnailService;
+                    }
+                }
+            }
+
+            // First image service.
+            const firstImageServices = firstImage.getProperty('service');
+            const firstImageService = Array.isArray(firstImageServices) ? firstImageServices[0] : firstImageServices;
+            if (firstImageService) {
+                const thumbnailFromFirstImageService = this.imageServiceToThumbnail(sizeInput, firstImageService, firstImage.getWidth(), label, this.index);
+                if (thumbnailFromFirstImageService) {
+                    return thumbnailFromFirstImageService;
+                }
+            }
+
+            // After this point, we could not find a preferred size.
+            // 1) if the thumbnail property on the canvas exists as a string, use that.
+            if (thumbnail && typeof thumbnail === 'string' && Canvas.thumbnailInBounds(sizeInput, { height: this.getHeight(), width: this.getWidth() })) {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    thumbnail,
+                    sizeInput.width,
+                    sizeInput.height,
+                    this.getWidth(),
+                    this.getHeight(),
+                );
+            }
+
+            // 2) if the thumbnail property on the canvas exists, use its ID.
+            if (thumbnail && (thumbnail['@id'] || thumbnail.id) && Canvas.thumbnailInBounds(sizeInput, thumbnail)) {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    thumbnail['@id'] || thumbnail.id,
+                    sizeInput.width,
+                    sizeInput.height,
+                    thumbnail.width || this.getWidth(),
+                    thumbnail.height || this.getHeight(),
+                );
+            }
+
+            // 3) if the thumbnail property on the first image exists as a string, use that.
+            if (firstImageThumbnail && typeof firstImageThumbnail === 'string') {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    firstImageThumbnail,
+                    sizeInput.width,
+                    sizeInput.height,
+                    this.getWidth(),
+                    this.getHeight(),
+                );
+            }
+
+            // 4) if the thumbnail property on the first image exists, use its ID.
+            if (firstImageThumbnail && (firstImageThumbnail['@id'] || firstImageThumbnail.id) && Canvas.thumbnailInBounds(sizeInput, firstImageThumbnail)) {
+                return new ThumbnailImage(
+                    this.index,
+                    label,
+                    firstImageThumbnail['@id'] || firstImageThumbnail.id,
+                    sizeInput.width,
+                    sizeInput.height,
+                    firstImageThumbnail.width || this.getWidth(),
+                    firstImageThumbnail.height || this.getHeight(),
+                );
+            }
+
+            // 5) We found nothing, use the ID of the first image.
+            // @todo could fallback further to out of bounds images?
+            return new ThumbnailImage(
+                this.index,
+                label,
+                firstImage.getProperty('id'),
+                sizeInput.width,
+                sizeInput.height,
+                firstImage.getWidth() || this.getWidth(),
+                firstImage.getHeight() || this.getHeight(),
+            );
+        }
+
+        getThumbnail(): Thumbnail | null {
+            let thumbnail: any = this.getProperty('thumbnail');
+
+            if (Array.isArray(thumbnail)) {
+                thumbnail = thumbnail[0];
+            }
+
+            if (thumbnail) {
+                return new Thumbnail(thumbnail, this.options);
+            }
+
+            return null;
+        }
+
         // http://iiif.io/api/image/2.1/#canonical-uri-syntax
         getCanonicalImageUri(w?: number): string {
-
+            console.warn('getCanonicalImageUri will be deprecated, use getThumbnailAtSize instead');
             let id: string | null = null;
             const region: string = 'full';
             const rotation: number = 0;

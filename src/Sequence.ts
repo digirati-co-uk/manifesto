@@ -221,7 +221,8 @@ namespace Manifesto {
 
             for (let i = 0; i < totalCanvases; i++) {
                 const canvas: ICanvas = this.getCanvasByIndex(i);
-                const thumb: Manifesto.IThumb = new Manifesto.Thumb(width, canvas);
+                const thumb: Manifesto.IThumb = canvas.getThumbnailAtSize(<IThumbnailSizeRequest>{ width, height });
+                thumb.data = canvas; // @todo wat.
                 thumbs.push(thumb);
             }
 
@@ -242,6 +243,12 @@ namespace Manifesto {
             }
 
             return this._thumbnails;
+        }
+
+        getThumbnailAtSize(sizeRequest: IThumbnailSizeRequest): IThumb[] {
+            return this.getCanvases().map((canvas: ICanvas) =>
+                canvas.getThumbnailAtSize(sizeRequest)
+            )
         }
 
         getStartCanvas(): string {
